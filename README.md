@@ -30,3 +30,8 @@ var streetviewPlayer = new google.maps.StreetViewPlayer({
 })
 </script>
 ```
+
+Example usage
+================
+
+An example can be found on the [GitHub Pages branch](http://bafolts.github.io/google-streetviewplayer/).
