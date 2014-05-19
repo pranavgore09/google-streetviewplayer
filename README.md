@@ -34,4 +34,4 @@ var streetviewPlayer = new google.maps.StreetViewPlayer({
 Example usage
 ================
 
-An example can be found on the [GitHub Pages branch](http://bafolts.github.io/google-streetviewplayer/).
+An example can be found [here](http://brianfolts.com/driver/).
