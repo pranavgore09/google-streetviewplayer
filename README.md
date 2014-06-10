@@ -8,9 +8,7 @@ Google Streetview Player
 
 ```html
 <script src="http://maps.google.com/maps/api/js?sensor=false" type="text/javascript"></script>
-<script type="text/javascript" src="google.maps.LatLng.js"></script>
 <script type="text/javascript" src="google.maps.StreetViewPlayer.js"></script>
-<script type="text/javascript" src="google.maps.StreetViewPlayer.Frame.js"></script>
 <script type="text/javascript">
 var streetviewPlayer = new google.maps.StreetViewPlayer({
 	origin: "Phoenix, AZ",
@@ -29,6 +27,8 @@ var streetviewPlayer = new google.maps.StreetViewPlayer({
 	}
 })
 </script>
+<div id="movie-canvas"></div>
+<div id="map-canvas"></div>
 ```
 
 Example usage
