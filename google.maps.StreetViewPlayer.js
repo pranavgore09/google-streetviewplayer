@@ -7,7 +7,6 @@ google.maps.StreetViewPlayer = function(config) {
 	this.config.movieCanvas.innerHTML = "";
 
 	var m_sPanoClient = new google.maps.StreetViewService();
-	var m_aVertices = [];
 	var m_aFrames = [];
 	var m_iSensitivity = 15;
 	var m_iPlayspeed = 300;
@@ -16,13 +15,9 @@ google.maps.StreetViewPlayer = function(config) {
 	var m_dDirectionsDisplay = null;
 	var m_bDoneLoading = true;
 	var m_sCanvasStyle = [];
-	for(var i=0;i<3;i++) {
-		m_sCanvasStyle.push(this.config.movieCanvas.appendChild(document.createElement("div")).style);
-	}
 	var m_mMarker = null;
 	var m_iTotalFrames = 0;
 	var m_bPaused = true;
-	var m_iVerticesBack = 0;
 	var self = this;
 
   function toRadians(deg) {
@@ -47,42 +42,49 @@ google.maps.StreetViewPlayer = function(config) {
 		self.setProgress(0);
 	}
 
-	function getPanoramaDataForVertex(vertex) {
-		m_sPanoClient.getPanoramaByLocation(vertex, m_iSensitivity, function(panoData, status) {
-			m_iVerticesBack++;
-			if(status === "OK") {
-				vertex.panoData = panoData;
-			} else {
-				vertex.panoData = null;
-			}
-
-			if(allVerticesHaveResponded()) {
-        removeEmptyVertices();
-				setupFrames();
-			}
-		})
-	}
-
-  function removeEmptyVertices() {
-		for(var i=0, length = m_aVertices.length;i<length;i++) {
-			if(m_aVertices[i].panoData === null) {
-				m_aVertices.splice(i--, 1);
+  function removeEmptyVertices(vertices) {
+		for(var i=0, length = vertices.length;i<length;i++) {
+			if(vertices[i].panoData === null) {
+				vertices.splice(i--, 1);
 			}
 		}
   }
 
-  function allVerticesHaveResponded() {
-    return m_iVerticesBack === m_aVertices.length;
-  }
-
-	function setupFrames() {
-		for(var i=0,length=m_aVertices.length;i<length;i++) {
-			m_aFrames.push(new Frame(m_aVertices[i], m_aVertices[Math.min(i+1,m_aVertices.length-1)]))
+	function setupFrames(vertices) {
+		for(var i=0,length=vertices.length;i<length;i++) {
+			m_aFrames.push(new Frame(vertices[i], vertices[Math.min(i+1, vertices.length-1)]))
 		}
 		m_iTotalFrames = m_aFrames.length;
 		m_bDoneLoading = true;
-		self.config.onPlay.call(this);
+    if (self.config.onPlay !== null && self.config.onPlay instanceof Function) {
+      self.config.onPlay.call(this);
+    }
 	}
+
+  /**
+   * Takes in an array of vertices and pulls the panoramic data
+   * for each location. Missing locations are removed from the list.
+   * @param Array<LatLng> The Locations to pull pano data for
+   */
+  function pullPanoDataForVertices(aVertices) {
+    var iVerticesResponded = 0;
+		for(var i=0,length=aVertices.length;i<length;i++) {
+      (function (vertex) {
+        m_sPanoClient.getPanoramaByLocation(vertex, m_iSensitivity, function(panoData, status) {
+          iVerticesResponded++;
+          if(status === "OK") {
+            vertex.panoData = panoData;
+          } else {
+            vertex.panoData = null;
+          }
+          if(iVerticesResponded===length) {
+            removeEmptyVertices(aVertices);
+            setupFrames(aVertices);
+          }
+        })
+      })(aVertices[i])
+    }
+  }
 
 	function getDirections() {
 		var self = this;
@@ -97,25 +99,22 @@ google.maps.StreetViewPlayer = function(config) {
 		}, function(result, status) {
 			if(status === google.maps.DirectionsStatus.OK) {
 				m_bPaused = true;
-				m_aVertices = result.routes[0].overview_path;
 				m_aFrames = [];
 				m_iTotalFrames = 0;
 				m_iCurrentFrame = 0;
 
-				for(var i=0,length=m_aVertices.length;i<length;i++) {
-					getPanoramaDataForVertex(m_aVertices[i]);
-				}
+        pullPanoDataForVertices(result.routes[0].overview_path);
 
 				if(m_dDirectionsMap===null) {
 					m_dDirectionsMap = new google.maps.Map(self.config.mapCanvas,{
 						zoom:14,
-						center : m_aVertices[0],
+						center : result.routes[0].overview_path[0],
 						mapTypeId: google.maps.MapTypeId.ROADMAP
 					});
 
 					m_mMarker = new google.maps.Marker({
 						map: m_dDirectionsMap,
-						location:m_aVertices[0],
+						location: result.routes[0].overview_path[0],
 						visible:true
 					})
 				}
@@ -348,6 +347,10 @@ google.maps.StreetViewPlayer = function(config) {
 		return m_iTotalFrames;
 	}
 
-	getDirections.call(this)
+  // INIT
+  for(var i=0;i<3;i++) {
+    m_sCanvasStyle.push(this.config.movieCanvas.appendChild(document.createElement("div")).style);
+  }
+  getDirections.call(this)
 
 }
