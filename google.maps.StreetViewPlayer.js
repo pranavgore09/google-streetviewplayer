@@ -3,22 +3,27 @@
  */
 google.maps.StreetViewPlayer = function(config) {
 
-	this.config = config;
-	this.config.movieCanvas.innerHTML = "";
+  this.config = config;
+  this.config.movieCanvas.innerHTML = "";
 
-	var m_sPanoClient = new google.maps.StreetViewService();
-	var m_aFrames = [];
-	var m_iSensitivity = 15;
-	var m_iPlayspeed = 300;
-	var m_iCurrentFrame = 0;
-	var m_dDirectionsMap = null;
-	var m_dDirectionsDisplay = null;
-	var m_bDoneLoading = true;
-	var m_sCanvasStyle = [];
-	var m_mMarker = null;
-	var m_iTotalFrames = 0;
-	var m_bPaused = true;
-	var self = this;
+  var m_sPanoClient = new google.maps.StreetViewService();
+  var m_aFrames = [];
+  var m_iSensitivity = 15;
+  var m_iFPS = 3;  // Frames per second
+  var m_iCurrentFrame = 0;
+  var m_dDirectionsMap = null;
+  var m_dDirectionsDisplay = null;
+  var m_bDoneLoading = true;
+  var m_mMarker = null;
+  var m_iPlayFrame = 0;
+  var m_iTotalFrames = 0;
+  var m_bPaused = true;
+  var m_elDraw = document.getElementById("movie-canvas");
+  var self = this;
+
+  if (typeof this.config.fps !== "undefined" && !isNaN(parseInt(this.config.fps))) {
+    m_iFPS = this.config.fps * 1;
+  }
 
   function toRadians(deg) {
     return deg*(Math.PI/180);
@@ -32,34 +37,35 @@ google.maps.StreetViewPlayer = function(config) {
     return (((Math.atan2(Math.sin(dLon)*Math.cos(lat2),Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon)))*180/Math.PI)+360)%360;
   }
 
-	function loadingMovie() {
-		for(var i=0;i<m_sCanvasStyle.length;i++) {
-			m_sCanvasStyle[i].backgroundImage = "none";
-		}
+  function loadingMovie() {
+
+    m_elDraw.style.background = "none";
+
     if (self.config.onLoading !== null && self.config.onLoading instanceof Function) {
       self.config.onLoading.call(this);
     }
-		self.setProgress(0);
-	}
-
-  function removeEmptyVertices(vertices) {
-		for(var i=0, length = vertices.length;i<length;i++) {
-			if(vertices[i].panoData === null) {
-				vertices.splice(i--, 1);
-			}
-		}
+    self.setProgress(0);
   }
 
-	function setupFrames(vertices) {
-		for(var i=0,length=vertices.length;i<length;i++) {
-			m_aFrames.push(new Frame(vertices[i], vertices[Math.min(i+1, vertices.length-1)]))
-		}
-		m_iTotalFrames = m_aFrames.length;
-		m_bDoneLoading = true;
+  function removeEmptyVertices(vertices) {
+    for(var i=0, length = vertices.length;i<length;i++) {
+      if(vertices[i].panoData === null) {
+        vertices.splice(i--, 1);
+        length--;
+      }
+    }
+  }
+
+  function setupFrames(vertices) {
+    for(var i=0,length=vertices.length;i<length;i++) {
+      m_aFrames.push(new Frame(vertices[i], vertices[Math.min(i+1, vertices.length-1)]))
+    }
+    m_iTotalFrames = m_aFrames.length;
+    m_bDoneLoading = true;
     if (self.config.onPlay !== null && self.config.onPlay instanceof Function) {
       self.config.onPlay.call(this);
     }
-	}
+  }
 
   /**
    * Takes in an array of vertices and pulls the panoramic data
@@ -68,7 +74,7 @@ google.maps.StreetViewPlayer = function(config) {
    */
   function pullPanoDataForVertices(aVertices) {
     var iVerticesResponded = 0;
-		for(var i=0,length=aVertices.length;i<length;i++) {
+    for(var i=0,length=aVertices.length;i<length;i++) {
       (function (vertex) {
         m_sPanoClient.getPanoramaByLocation(vertex, m_iSensitivity, function(panoData, status) {
           iVerticesResponded++;
@@ -86,51 +92,67 @@ google.maps.StreetViewPlayer = function(config) {
     }
   }
 
-	function getDirections() {
-		var self = this;
-		m_mMarker = null;
-		m_bDoneLoading = false;
-		loadingMovie.call(self);
+  function getDirections() {
+    var self = this;
+    m_mMarker = null;
+    m_bDoneLoading = false;
+    loadingMovie.call(self);
 
-		(new google.maps.DirectionsService()).route({
-      origin: this.config.origin,
-      destination: this.config.destination,
-      travelMode: this.config.travelMode
-		}, function(result, status) {
-			if(status === google.maps.DirectionsStatus.OK) {
-				m_bPaused = true;
-				m_aFrames = [];
-				m_iTotalFrames = 0;
-				m_iCurrentFrame = 0;
+    if (typeof this.config.route === "undefined") {
+      (new google.maps.DirectionsService()).route({
+        origin: this.config.origin,
+        destination: this.config.destination,
+        travelMode: this.config.travelMode
+      }, function(result, status) {
+        if(status === google.maps.DirectionsStatus.OK) {
+          loadRoute(result.routes[0])
+          if(m_dDirectionsDisplay===null) {
+            m_dDirectionsDisplay = new google.maps.DirectionsRenderer();
+            m_dDirectionsDisplay.setMap(m_dDirectionsMap);
+          }
+          m_dDirectionsDisplay.setDirections(result);
+        } else if (self.config.onError != null && self.config.onError instanceof Function) {
+          self.config.onError.call(this, "Error pulling directions for movie, please try again.")
+        }
+      })
+    } else {
+      loadRoute(this.config.route);
+      var flightPath = new google.maps.Polyline({
+        path: this.config.route.overview_path,
+        geodesic: true,
+        strokeColor: '#FF0000',
+        strokeOpacity: 1.0,
+        strokeWeight: 2
+      });
+      flightPath.setMap(m_dDirectionsMap);
+    }
 
-        pullPanoDataForVertices(result.routes[0].overview_path);
+  }
 
-				if(m_dDirectionsMap===null) {
-					m_dDirectionsMap = new google.maps.Map(self.config.mapCanvas,{
-						zoom:14,
-						center : result.routes[0].overview_path[0],
-						mapTypeId: google.maps.MapTypeId.ROADMAP
-					});
+  function loadRoute(route) {
+    m_bPaused = true;
+    m_aFrames = [];
+    m_iTotalFrames = 0;
+    m_iCurrentFrame = 0;
 
-					m_mMarker = new google.maps.Marker({
-						map: m_dDirectionsMap,
-						location: result.routes[0].overview_path[0],
-						visible:true
-					})
-				}
-				
-				if(m_dDirectionsDisplay===null) {
-					m_dDirectionsDisplay = new google.maps.DirectionsRenderer();
-					m_dDirectionsDisplay.setMap(m_dDirectionsMap);
-				}
-				m_dDirectionsDisplay.setDirections(result);
-				self.setPaused(false);
-			} else {
-				alert("Error pulling directions for movie, please try again.");
-			}
-		})
+    pullPanoDataForVertices(route.overview_path);
 
-	}
+    if(m_dDirectionsMap===null) {
+      m_dDirectionsMap = new google.maps.Map(self.config.mapCanvas,{
+        zoom:14,
+        center : route.overview_path[0],
+        mapTypeId: google.maps.MapTypeId.ROADMAP
+      });
+
+      m_mMarker = new google.maps.Marker({
+        map: m_dDirectionsMap,
+        location: route.overview_path[0],
+        visible:true
+      })
+    }
+
+    self.setPaused(false);
+  }
 
   /**
    * Represents a google maps StreetViewPlayer Frame
@@ -145,6 +167,9 @@ google.maps.StreetViewPlayer = function(config) {
     this.m_iNextYaw = bearingTo(vertex, nextVertex.panoData.location.latLng);
     this.m_aImages = [];
     this.m_bLoaded = false;
+
+    // Used to avoid API look-up
+    this.m_aCanvasStyles = null;
 
     var iMoveYaw = this.m_iNextYaw - this.m_iCameraYaw;
     if(iMoveYaw < 0) {
@@ -202,34 +227,14 @@ google.maps.StreetViewPlayer = function(config) {
   }
 
   /**
-   * Determines if all of the images required to display the frame have loaded.
-   */
-  Frame.prototype.isLoaded = function() {
-    if(this.m_bLoaded===false) {
-      for(var i=0,length=this.m_aImages.length;i<length;i++) {
-        if(this.m_aImages[i].width===0) {
-          break;
-        }
-      }
-      if(i===length) {
-        this.m_bLoaded = true;
-      }
-    }
-    return this.m_bLoaded;
-  }
-
-  /**
-   * Gets the current latLng which the frame represents.
-   */
-  Frame.prototype.getPosition = function() {
-    return this.m_pPanoData.location.latLng;
-  }
-
-  /**
-   * Gets the display data for the frame.
-   * @return Array of FrameData.
+   * The Url for API usage, downloaded movies
+   * will utilize this for time being.
    */
   Frame.prototype.getDisplayData = function() {
+    return "http://maps.googleapis.com/maps/api/streetview?size=600x600&location=" + this.m_pPanoData.location.latLng.lat() + "," + this.m_pPanoData.location.latLng.lng() + "&heading=" + this.m_iNextYaw + "&key=AIzaSyCT7wTikxOs9TzFp2C5zDTOlwnNY0oz_h4";
+  }
+
+  Frame.prototype.getImageData = function () {
     var iImageCenter = this.m_iCanvasOffset;
     var aImages = this.m_aCanvasStyles;
     if(aImages.length===3) {
@@ -267,90 +272,101 @@ google.maps.StreetViewPlayer = function(config) {
     }
   }
 
-	function drawFrame(frame) {
-
-		var data = frame.getDisplayData(frame);
-
-		for(var i=0,length=data.length;i<length;i++) {
-			var img = data[i];
-			m_sCanvasStyle[i].left = img.left;
-			m_sCanvasStyle[i].backgroundImage = "url("+img.image+")";
-			m_sCanvasStyle[i].width = img.width || "512px"
-		}
-		
-		for(length=m_sCanvasStyle.length;i<length;i++) {
-			m_sCanvasStyle[i].width = "0px";
-		}
-
-		m_mMarker.setPosition(frame.getPosition());
-
-	}
-
-	function framePlayer() {
-		if(m_bPaused===false) {
-			if(m_iCurrentFrame >= m_iTotalFrames ) {
-				self.setProgress(m_iTotalFrames);
-			} else if(m_bPaused===false && m_iTotalFrames > 0 && m_iCurrentFrame<=m_iTotalFrames && m_aFrames[m_iCurrentFrame].isLoaded() ) {
-				self.setProgress(m_iCurrentFrame);
-				m_iCurrentFrame++;
-			}
-			setTimeout(framePlayer, m_iPlayspeed);
-		}
-	};
-
-	this.setSensitivity = function(sensitivity) {
-		m_iSensitivity = sensitivity;
-	}
-
-	this.getSensitivity = function() {
-		return m_iSensitivity;
-	}
-
-	this.setPlaySpeed = function(playspeed) {
-		m_iPlayspeed = playspeed;
-	}
-	
-	this.getPlaySpeed = function() {
-		return m_iPlayspeed;
-	}
-
-	this.getPlayerData = function() {
-		var aData = [];
-		for(var i=0;i<m_aFrames.length;i++) {
-			aData.push(m_aFrames[i].getDisplayData());
-		}
-		return {
-			frames : aData
-		}
-	}
-
-	this.setProgress = function(newFrame) {
-		m_iCurrentFrame = newFrame;
-		if(m_iCurrentFrame >=0 && m_iCurrentFrame < m_aFrames.length) {
-			drawFrame(m_aFrames[m_iCurrentFrame])
-		}
-		self.config.onProgress.call(this, parseInt(100*m_iCurrentFrame/m_iTotalFrames));
-	}
-
-	this.setPaused = function(paused) {
-		m_bPaused = paused;
-		if(paused===false) {
-			framePlayer.call(self);
-		}
-	}
-
-	this.getPaused = function() {
-		return m_bPaused;
-	}
-	
-	this.getTotalFrames = function() {
-		return m_iTotalFrames;
-	}
-
-  // INIT
-  for(var i=0;i<3;i++) {
-    m_sCanvasStyle.push(this.config.movieCanvas.appendChild(document.createElement("div")).style);
+  /**
+   * Gets the current latLng which the frame represents.
+   */
+  Frame.prototype.getPosition = function() {
+    return this.m_pPanoData.location.latLng;
   }
+
+  this.dispose = function() {
+    clearTimeout(m_iPlayFrame)
+  }
+
+  function drawFrame(frame) {
+
+    var data = frame.getImageData(frame);
+
+    var aBackgroundImages = [];
+    var aBackgroundRepeats = [];
+    var aBackgroundPositions = [];
+
+    for (var i = 0, length = data.length; i < length; i++) {
+      aBackgroundImages.push("url(" + data[i].image + ")");
+      aBackgroundRepeats.push("no-repeat");
+      aBackgroundPositions.push(data[i].left + " 0px");
+    }
+
+    m_elDraw.style.backgroundImage = aBackgroundImages.join(",");
+    m_elDraw.style.backgroundRepeat = aBackgroundRepeats.join(",");
+    m_elDraw.style.backgroundPosition = aBackgroundPositions.join(",");
+
+    m_mMarker.setPosition(frame.getPosition());
+
+  }
+
+  function framePlayer() {
+    if(m_bPaused===false) {
+      if(m_iCurrentFrame >= m_iTotalFrames ) {
+        self.setProgress(m_iTotalFrames);
+      } else if(m_bPaused===false && m_iTotalFrames > 0 && m_iCurrentFrame<=m_iTotalFrames) {
+        self.setProgress(m_iCurrentFrame);
+        m_iCurrentFrame++;
+      }
+      m_iPlayFrame = setTimeout(framePlayer, (1000/m_iFPS)>>0);
+    }
+  };
+
+  this.setSensitivity = function(sensitivity) {
+    m_iSensitivity = sensitivity;
+  }
+
+  this.getSensitivity = function() {
+    return m_iSensitivity;
+  }
+
+  this.setFPS = function(fps) {
+    m_iFPS = Math.max(1, fps);
+  }
+
+  this.getFPS = function() {
+    return m_iFPS;
+  }
+
+  this.getPlayerData = function() {
+    var aData = [];
+    for(var i=0;i<m_aFrames.length;i++) {
+      aData.push(m_aFrames[i].getDisplayData());
+    }
+    return {
+      frames : aData,
+      fps: m_iFPS
+    }
+  }
+
+  this.setProgress = function(newFrame) {
+    m_iCurrentFrame = newFrame;
+    if(m_iCurrentFrame >=0 && m_iCurrentFrame < m_aFrames.length) {
+      drawFrame(m_aFrames[m_iCurrentFrame])
+    }
+    self.config.onProgress.call(this, parseInt(100*m_iCurrentFrame/m_iTotalFrames));
+  }
+
+  this.setPaused = function(paused) {
+    m_bPaused = paused;
+    if(paused===false) {
+      framePlayer.call(self);
+    }
+  }
+
+  this.getPaused = function() {
+    return m_bPaused;
+  }
+
+  this.getTotalFrames = function() {
+    return m_iTotalFrames;
+  }
+
   getDirections.call(this)
 
 }
